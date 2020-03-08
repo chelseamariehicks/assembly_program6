@@ -18,21 +18,22 @@ INCLUDE Irvine32.inc
 ;
 ; MACRO to get a string of input from the user
 ;
-; Receives: displayMsg - OFFSET to the message to display 
-;			stringAddr - variable to store string input from user
+; Receives: message to display (displayMsg), variable to store string input (strAddr),
+;		and 
 ; Preconditions: none
 ; Registers changed: none
 ; Postconditions: input from user stored in variable
 ;------------------------------------------------------------
-getString	MACRO displayMsg, stringAddr
+getString	MACRO displayMsg, strAddr, maxLength, strLength
 	push	edx
 	push	ecx
 	push	eax
-	mov		edx, OFFSET displayMsg
+	mov		edx, displayMsg
 	call	WriteString
-	mov		edx, stringAddr					;location of user input in memory
-	mov		ecx, MAX_STRING_LENGTH			;limits number of characters allowed by user
+	mov		edx, strAddr					;location to store string input
+	mov		ecx, maxLength					;limits number of characters allowed by user
 	call	ReadString						;acquire user input
+	mov		strLength, eax					;store length of string in variable
 	pop		eax
 	pop		ecx
 	pop		edx
@@ -43,27 +44,30 @@ ENDM
 ;
 ; MACRO to print a string stored in specific memory location
 ;
-; Receives: addrStrDisplay - address if the string to be displayed
+; Receives: address of the string to be displayed (addrStrDisplay)
 ; Preconditions: none
 ; Registers changed: none
 ; Postconditions: input from user stored in variable
 ;------------------------------------------------------------
 displayString	MACRO addrStrDisplay
 	push	edx
-	mov		edx, OFFSET addrStrDisplay
+	mov		edx, addrStrDisplay
 	call	WriteString
+	call	Crlf
 	pop		edx
 ENDM
 
 ;constant definitions
 ARRAYSIZE			EQU		10			;defines constant size for array
-MAX_STRING_LENGTH	EQU		100			;defines constant for max string length entered by user
+MAXSTRING			EQU		20			;defines constant for max string length entered by user
+LOWERLIMIT			EQU		-2147483648	;defines constant lower limit for numeric value
+UPPERLIMIT			EQU		2147483647	;defines constant upper limit for numeric value
 
 .data
-array			DWORD	ARRAYSIZE	DUP(?)			;array to store signed integers entered by user
-stringInput		BYTE	MAX_STRING_LENGTH+1	DUP(?)	;stores user input string
-stringLength	DWORD	LENGTHOF stringInput		
-convertInt		DWORD	0							;stores integer value after converted from string input
+array			SDWORD	ARRAYSIZE	DUP(?)			;array to store signed integers entered by user
+stringInput		BYTE	MAXSTRING+1	DUP(?)			;stores user input string
+stringLength	DWORD	?							;number of characters in the string	
+numericVal		SDWORD	0							;stores integer value after converted from string input
 
 ;messages to be printed to the screen
 progTitle		BYTE	"Designing Low-Level I/O Procedures", 0
@@ -92,16 +96,19 @@ main PROC
 	push	OFFSET authName
 	call	introduction
 
+;Display instructions for the user 
+	displayString	OFFSET instruct						;invoke macro to display instructions
+
 ;Get user's string of digits and convert to numeric values
-	push	OFFSET array
-	push	OFFSET stringInput
+	push	OFFSET array							;pass array, location to store string input,
+	push	OFFSET stringInput						;size of string, and prompts by reference
 	push	SIZEOF stringInput
+	push	stringLength							;pass length of string by value
+	push	ARRAYSIZE								;pass array size limit by value
 	push	OFFSET numPrompt
 	push	OFFSET errorMsg 
 	call	ReadVal
 
-	displayString	instruct						;invoke macro to display prompt and get user input
-													;stored in specified memory location
 
 	exit	; exit to operating system
 main ENDP
@@ -137,14 +144,70 @@ introduction	ENDP
 ; Procedure gets user's string of digits and converts string to numeric
 ; Receives: parameters on system stack
 ; Preconditions: none
-; Registers changed:
-; Postconditions: 
+; Registers changed: ecx, 
+; Postconditions: validated string of digits entered by user converted to numeric 
 ;------------------------------------------------------------
 ReadVal PROC
-	push	ebp
+	push	ebp										;setup stack frame
 	mov		ebp, esp
+	mov		ecx, [ebp+16]							;number of elements allowed, ARRAYSIZE, in loop counter
+	mov		edi, [ebp+28]							;first element in the array
+
+getUserInput:
+	push	ecx										;save loop counter
+	getString [ebp+12], [ebp+28], [ebp+24], [ebp+20] ;call macro to display numPrompt and get user input string
+	mov		esi, [ebp+28]							;place the input string in esi
+	mov		ecx, [ebp+20]							;length of string entered
+	cld												;clear direction flag to read data going forward
+
+	xor		eax, eax								;clear registers
+	xor		ebx, ebx
+validateInput:										
+	lodsb											;load a byte from the user string to check
+	cmp		eax, 48									;if the byte valure is >= 48, the sign doesn't need checking
+	jae		noSign
+
+;2bh or 43 = +, 2dh or 45d = -, 30h - 39h or 48d-57d
+checkSign:											;check if first val in string is + or - sign
+;must check if this is first val or not, if not first val, error
+	;cmp		eax, 43
+	;je		positiveSign
+	;cmp		eax, 45
+	;je		negativeSign
+
+noSign:												;if byte is greater than 57, it isn't integer value
+	cmp		eax, 57
+	ja		error
+	sub		eax, 48									;convert ascii value to int
+	push	eax										;FIGURE OUT WHAT'S HAPPENING HERE
+	mov		eax, ebx
+	mov		ebx, [ebp+16]
+	mul		ebx
+	mov		ebx, eax
+	pop		eax
+	add		ebx, eax
+	mov		eax, ebx
+
+	xor		eax, eax
+	loop	validateInput
+
+	mov		eax, ebx
+	stosd											;add eax to array
+
+	add		esi, 4									;move to next element
+	pop		ecx
+	loop	getUserInput
+	jmp		userInputComplete
+
+error:
+	pop		ecx
+	displayString [ebp+8]							;print error message
+	jmp		getUserInput							;require user to enter valid input
+
+userInputComplete:
+
 	pop		ebp
-	ret		20
+	ret		28
 ReadVal	ENDP
 
 
