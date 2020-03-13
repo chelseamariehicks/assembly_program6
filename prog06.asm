@@ -120,25 +120,28 @@ main PROC
 ;Print user input to the screen after converting values back to string input from numeric using writeVal
 	push	OFFSET arrayMsg							;pass prompt for displaying values to screen
 	push	OFFSET	comma							;pass space and comma for listing values
-	push	LENGTHOF array							;pass length of array
+	push	ARRAYSIZE								;pass size of array
 	push	OFFSET array							;pass actual array filled with user input
 	push	OFFSET outputString						;pass string for storing converted values before printing	
 	call	printValues
 	
+	call	Crlf
 	call	Crlf
 
 ;Calculate and print to the screen the sum and average of the user entered values
 	push	OFFSET sumMsg							;pass prompt for displaying sum by reference
 	push	OFFSET avgMsg							;pass prompt for displaying average by reference
 	push	OFFSET outputString						;pass string for storing vlues 
-	push	LENGTHOF array							;pass length of array
-	push	array									;pass actual array
+	push	ARRAYSIZE								;pass size of array by value
+	push	OFFSET array							;pass actual array
 	call	completeCalculations
 
 	call	Crlf
 
 ;Print farewell message to the screen
 	displayString OFFSET farewellMSg
+	call	Crlf
+
 	exit	; exit to operating system
 main ENDP
 
@@ -297,8 +300,11 @@ printEach:
 	push	[edi]								;numeric element in array
 	push	[ebp+8]								;points to address of string for output
 	call	writeVal
+	cmp		ecx, 1
+	je		skipComma
 	displayString [ebp+20]						;insert a comma and space before moving to next value
-	add		edi, 4								;move to next element in the arry
+skipComma:
+	add		edi, 4								;move to next element in the array
 	loop	printEach
 
 	pop		edi									;restore registers
@@ -373,38 +379,38 @@ writeVal	ENDP
 completeCalculations PROC
 	push	ebp
 	mov		ebp, esp							;setup stack frame
-	mov		eax, 0
-	mov		ecx, 10								;loop counter for summing elements
-	mov		esi, [ebp+8]
+	
+	mov		edi, 0
+	mov		ecx, [ebp+12]						;loop counter as ARRAYSIZE for summing elements
+	mov		ebx, [ebp+8]						;first element in the array
+	displayString [ebp+24]						;display message for printing the sum
 
 calculateSum:
-	add		eax, [esi]							;continue to add an array value
-	add		esi, 4								;move to next element in the array
+	add		edi, [ebx]							;continue to add an array value
+	add		ebx, 4								;move to next element in the array
 	loop	calculateSum
-	call	WriteDec
 
-	;mov		edi, 0							;initialize edi to 0 for calculating sum
-	;mov		edi, [ebp+8]						;first element in the array
-	;mov		ecx, 10								;use lengthof the array as counter
-	;mov		eax, 0
-	;displayString [ebp+24]						;display message for printing the sum
-
-;calculateSum:
-	;mov		ebx, [esi]							;continue to add an array value
-	;add		eax, ebx
-	;add		esi, 4								;move to next element in the array
-	;loop	calculateSum
-
-;displaySum:
-	;push	[eax]									;sum stored in edi and pushed on stack
-	;push	[ebp+16]							;push address of outputString on stack
-	;call	writeVal							;use writeVal to convert sum and print
+displaySum:
+	push	edi									;sum stored in edi and pushed on stack
+	push	[ebp+16]							;push address of outputString on stack
+	call	writeVal							;use writeVal to convert sum and print
 
 	call	Crlf
+	call	Crlf
 	displayString [ebp+20]						;display message for printing the average
+
+calculateAvg:
+	mov		ecx, [ebp+12]						;ARRAYSIZE set as divisor for finding average
+	mov		eax, edi							
+	idiv	ecx									;divide the sum of array elements by number of elements
+
+displayAvg:
+	push	eax									;average stored in eax
+	push	[ebp+16]							;address of outputString on stack
+	call	writeVal
+
+	call	Crlf
 	
-	
-												;restore registers
 	pop		ebp
 	ret		20
 completeCalculations	ENDP
