@@ -4,10 +4,14 @@ TITLE Programming Assignment #6     (prog06.asm)
 ; OSU email address: hicksche@oregonstate.edu
 ; Course number/section: CS271-400
 ; Project Number: Program #6	Due Date: Sunday, March 15 by 11:59 PM
-; Description: Program gets 10 valid integers from the user and stores numeric values
-;		in an array. These integers are then dislpayed to the screen along with their
-;		sum and their average. Program implements ReadVal and WriteVal procedures
-;		for signed integers and macros for getting and displaying user data as strings.
+;
+; Description: Program gets 10 valid signed integers that can fit in a 32-bit register
+;		from the user as string input, converts each string to numeric values,
+;		and stores the numeric values in an array. These values are then converted
+;		back to string input before being dislpayed to the screen along with their
+;		sum and their average, both of which are calculated in the program. 
+;		Program implements ReadVal and WriteVal procedures for signed integers and 
+;		macros for getting and displaying user data as strings.
 
 INCLUDE Irvine32.inc
 
@@ -20,12 +24,14 @@ ARRAYSIZE			EQU		10			;defines constant size for array
 ;------------------------------------------------------------
 ; getString
 ;
-; MACRO to get a string of input from the user
+; MACRO to prompt a user for a string of input
 ;
-; Receives: message to display (displayMsg) and variable to store string input (storeString) 
+; Receives: message to display (displayMsg), variable to store string input (storeString),
+;	variable containing the limit for string length (stringSize), and counter
+;	variable for the length of the string entered by the user
 ; Preconditions: none
 ; Registers changed: none
-; Postconditions: input from user stored in variable
+; Postconditions: input from user stored in memory location
 ;------------------------------------------------------------
 getString	MACRO displayMsg, storeString, stringSize, stringCount
 	push	edx
@@ -45,10 +51,10 @@ ENDM
 ;
 ; MACRO to print a string stored in specific memory location
 ;
-; Receives: address of the string to be displayed (addrStrDisplay)
+; Receives: address of the string to be displayed (stringDisplay)
 ; Preconditions: none
 ; Registers changed: none
-; Postconditions: input from user stored in variable
+; Postconditions: string printed to screen
 ;------------------------------------------------------------
 displayString	MACRO stringDisplay
 	push	edx
@@ -57,22 +63,15 @@ displayString	MACRO stringDisplay
 	pop		edx
 ENDM
 
-
-;MAXSTRING			EQU		11			;defines constant for max string length entered by user
-;INPUTSIZE			EQU		1			;defines constant for size of input for sum and average
-;LOWERLIMIT			EQU		-2147483648	;defines constant lower limit for numeric value
-;UPPERLIMIT			EQU		2147483647	;defines constant upper limit for numeric value
-
 .data
 ;variables used throughout the program
 array			SDWORD	ARRAYSIZE	DUP(?)			;array to store signed integers entered by user
-inputString		BYTE 20 DUP (?)						;stores input of user
-outputString	BYTE 20 DUP (?)						;output post-conversion
+inputString		BYTE 12 DUP (?)						;stores input of user
+outputString	BYTE 12 DUP (?)						;output post-conversion
 stringLength	DWORD	0							;number of characters in the string
-;sumVal			SDWORD	?							;stores value of the sum of numbers entered by user
-;avgVal			SDWORD	?							;stores the average of the values entered by user
-
-;negativeCheck	DWORD	?							;variable to flag a user input as negative
+negFlag			SDWORD	0							;variable for negative flag
+firstVal		DWORD	0							;variable for flagging first byte read in readVal validation
+sumVal			SDWORD	?							;stores value of the sum of numbers entered by user
 
 ;messages to be printed to the screen
 progTitle		BYTE	"Designing Low-Level I/O Procedures", 0
@@ -102,11 +101,13 @@ main PROC
 	call	Crlf
 
 ;Display instructions for the user 
-	displayString	OFFSET instruct						;invoke macro to display instructions
+	displayString	OFFSET instruct					;invoke macro to display instructions
 	call	Crlf
 	call	Crlf
 
-;Get the user's string of digits and convert each string of digits to numeric values
+;Get the user's strings of digits and convert each string to numeric values
+	push	firstVal								;pass in var for tracking first value read in
+	push	negFlag									;pass in var for negative flag
 	push	SIZEOF inputString						;pass in var for size of string entered by user
 	push	OFFSET inputString						;pass variable for storing string entered
 	push	OFFSET stringLength						;pass length of string by reference
@@ -116,8 +117,10 @@ main PROC
 	call	readVal
 
 	call	Crlf
+	call	Crlf
 
 ;Print user input to the screen after converting values back to string input from numeric using writeVal
+	push	negFlag									;pass in var for negative flag
 	push	OFFSET arrayMsg							;pass prompt for displaying values to screen
 	push	OFFSET	comma							;pass space and comma for listing values
 	push	ARRAYSIZE								;pass size of array
@@ -129,6 +132,8 @@ main PROC
 	call	Crlf
 
 ;Calculate and print to the screen the sum and average of the user entered values
+	push	sumVal									;pass in var for storing sumValue
+	push	negFlag									;pass in var for negative flag
 	push	OFFSET sumMsg							;pass prompt for displaying sum by reference
 	push	OFFSET avgMsg							;pass prompt for displaying average by reference
 	push	OFFSET outputString						;pass string for storing vlues 
@@ -153,7 +158,7 @@ main ENDP
 ; Procedure introduces the program and programmer
 ; Receives: address of progTitle and authName to print to screen
 ; Preconditions: none
-; Registers changed: edx
+; Registers changed: none
 ; Postconditions: introduction printed to screen
 ;------------------------------------------------------------
 introduction PROC
@@ -171,11 +176,14 @@ introduction	ENDP
 ;------------------------------------------------------------
 ; readVal
 ;
-; Procedure gets user's string of digits and converts string to numeric
-; Receives: parameters on system stack
+; Procedure gets user's strings of digits and converts each string to numeric
+; Receives: flags for firstval entered and negative flag, variable for the
+;		size of string entered by the user, variable to store the string entered,
+;		the array for values to be stored in once onverted to numeric, and 
+;		messages to print to screen for prompting user and in case of error
 ; Preconditions: none
 ; Registers changed: none
-; Postconditions: 10 validated string of digits entered by user converted
+; Postconditions: 10 validated strings of digits entered by user converted
 ;	to numeric values stored in array
 ;------------------------------------------------------------
 readVal PROC
@@ -186,10 +194,11 @@ readVal PROC
 	mov		eax, 0
 	push	edi
 	mov		edi, [ebp+16]						;point to address of array
-	mov		ecx, 10						
+	mov		ecx, 10								;counter for number of elements to be entered, could
+												;push ARRAYSIZE on stack for this
 
 getUserInput:
-	getString [ebp+12], [ebp+24], [ebp+28], [ebp+20] ;call MACRO to display numPrompt and acquire a string
+	getString [ebp+12], [ebp+24], [ebp+28], [ebp+20] ;call MACRO to display numPrompt and acquire a string of digits
 
 evaluateString:
 	push	ecx									;save counter for outer loop
@@ -201,23 +210,49 @@ evaluateString:
 	mov		ebx, 0
 	cld											;clear direction flag to read data going forward
 
-validateLength:
-	mov		eax, [ebp+20]						;check that length isn't greater than alloted amount
-	cmp		eax, MAXSTRING
-	jg		error
-
 beginConversion:								;look at single byte and determine if it's a number
 	lodsb
-	cmp		al, 48								
+	cmp		al, 48								;if ascii char is less than 48, the sign needs to be checked						
 	jae		noSign
-	;jmp		checkSign
+checkFirstVal:
+	mov		edx, [ebp+36]						;move first val flag to and check if it's 0 indicating first value
+	cmp		edx, 0								
+	je		updateFirstVal						;must check the sign on first value entered
+	cmp		al, 48								;if not first value, al is less than 48 and input is invalid
+	jl		error
+
+updateFirstVal:
+	inc		edx									;increase firstVal flag after it has been checked
+	mov		[ebp+36], edx
+	mov		edx, 0
+
+;check if first val in string is + (43 ascii) or - (45 ascii) sign
+checkSign:
+	cmp		al, 43
+	je		nextByte							;positive sign at start of input, move on to next byte
+	cmp		al, 45
+	je		negativeSign						;negative sign at start of input
+
+;negative number entered, negFlag needs to be set to use NEG later
+negativeSign:
+	mov		edx, 0								;clear edx
+	mov		edx, [ebp+20]						;check for just negative sign entered and jump to error if so
+	cmp		edx, 1
+	je		error
+	mov		edx, [ebp+32]						;set negative flag
+	mov		edx, -1
+	mov		[ebp+32], edx
+	mov		edx, 0								;clear edx
+	jmp		nextByte
 
 noSign:
-	cmp		al, 57
+	cmp		al, 57								;check if byte is greater than ascii 57 indicating a non digit entered
 	jg		error								;input is invalid and user needs to enter again
+	
+signChecked:
 	mov		bl, al				
 	
-;utilizes code from Lecture #23
+;utilizes code from Lecture #23 on How ReadInt Works
 	mov		eax, 0
 	mov		eax, edi
 	mov		edi, 10
@@ -228,49 +263,62 @@ noSign:
 	sub		eax, 48
 	add		eax, edi
 	mov		edi, eax
-	loop	beginConversion
+nextByte:
+	loop	beginConversion						;continue converting each byte in the entered string
 
 completeConversion:
 	mov		eax, edi
+	jo		error								;check if value in eax cause overflow and is too big or too small
 	pop		ebx									;restore registers
 	pop		edi
 	pop		ecx
-	jmp		insertInArray
+	jmp		checkNegFlag						;check if value was negative
 
 ;invalid input entered, display message to user and acquire new input
 error:
 	pop		ebx
 	pop		edi
 	pop		ecx
-	push	edx
 	displayString [ebp+8]
 	call	Crlf
-	pop		edx
+	mov		edx, [ebp+32]						;reset negative flag for next user input
+	mov		edx, 0
+	mov		[ebp+32], edx
+	mov		edx, [ebp+36]						;reset firstVal flag
+	mov		edx, 0
+	mov		[ebp+36], edx
+	xor		eax, eax							;clear eax and OF flag
 	jmp		getUserInput
 
+checkNegFlag:
+	mov		edx, [ebp+32]						;check if negative flag is set
+	cmp		edx, -1
+	jne		insertInArray						;flag isn't set, so value can be entered
+	
+negValue:
+	neg		eax									;make sure value added to array is negative
+	
 insertInArray:
 	mov		[edi], eax							;insert numeric value in array
+resetFlags:
+	mov		edx, [ebp+32]						;reset negative flag for next user input
+	mov		edx, 0
+	mov		[ebp+32], edx
+	mov		edx, [ebp+36]						;reset firstVal flag
+	mov		edx, 0
+	mov		[ebp+36], edx	
+	xor		eax, eax							;clear contents of eax
 	add		edi, 4								;move to next element position
 	dec		ecx
 	cmp		ecx, 0								;continue to acquire user input until 10 numbers acquired
 	jne		getUserInput
 	
 
-;2bh or 43 = +, 2dh or 45d = -, 30h - 39h or 48d-57d
-;checkSign:											;check if first val in string is + or - sign
-;must check if this is first val or not, if not first val, error
-	;cmp		eax, 43
-	;je		positiveSign
-	;cmp		eax, 45
-	;je		negativeSign
-
-
-
 userInputComplete:
 	pop		edi										;restore registers						
 	pop		eax
 	pop		ebp
-	ret		24
+	ret		32
 readVal	ENDP
 
 ;------------------------------------------------------------
@@ -297,6 +345,7 @@ printValues PROC
 
 ;call on writeVal to convert each element in the array and print each element
 printEach:
+	push	[ebp+28]							;negative flag
 	push	[edi]								;numeric element in array
 	push	[ebp+8]								;points to address of string for output
 	call	writeVal
@@ -310,7 +359,7 @@ skipComma:
 	pop		edi									;restore registers
 	pop		ecx
 	pop		ebp
-	ret		20
+	ret		24
 printValues	ENDP
 
 ;------------------------------------------------------------
@@ -338,14 +387,36 @@ writeVal PROC
 
 	push	0									;end of string terminating 0
 
+checkForNegative:								;check if array element contains negaitve value
+	cmp		eax, 0
+	jg		beginConversion						;begin conversion if number is not negative
+negative:
+	mov		edx, [ebp+16]						;set negative flag
+	mov		edx, -1
+	mov		[ebp+16], edx
+	mov		ebx, -1								;create positive number for converting to string
+	imul	ebx
+	mov		ebx, 10								;return divisor to 10
+	
 beginConversion:
 	mov		edx, 0								;clear edx register for division
 	idiv	ebx									;divide by 10
 	add		edx, 48								;convert single digit value in edx to ascii char
+	jmp		addChar
+
+addChar:
 	push	edx									;push ascii char to stack
 	cmp		eax, 0
 	jne		beginConversion						;continue until end of value is reached
 
+inputNegativeSign:
+	mov		edx, [ebp+16]
+	cmp		edx, -1								;check if number being written is negative
+	jne		inOrder						
+	mov		edx, "-"							;insert negative sign to be popped at the front	
+	push	edx
+	mov		edx, 0
+	mov		[ebp+16], edx							;reset negFlag
 ;pop stack to place in output string the values in order
 inOrder:
 	pop		eax
@@ -361,7 +432,7 @@ printAsString:
 	pop		ebx
 	pop		eax
 	pop		ebp
-	ret		8
+	ret		12
 writeVal	ENDP
 
 ;------------------------------------------------------------
@@ -386,11 +457,22 @@ completeCalculations PROC
 	displayString [ebp+24]						;display message for printing the sum
 
 calculateSum:
+	mov		eax, [ebx]
+	cmp		eax, 0								;check if value is negative
+	jl		subtract
 	add		edi, [ebx]							;continue to add an array value
+	jmp		nextElementToSum
+subtract:
+	mov		edx, -1
+	imul	edx
+	sub		edi, eax
+nextElementToSum:	
 	add		ebx, 4								;move to next element in the array
 	loop	calculateSum
 
+	mov		[ebp+32], edi						;store sum in sumVal to be used in calculation for avg
 displaySum:
+	push	[ebp+28]							;negFlag
 	push	edi									;sum stored in edi and pushed on stack
 	push	[ebp+16]							;push address of outputString on stack
 	call	writeVal							;use writeVal to convert sum and print
@@ -400,11 +482,13 @@ displaySum:
 	displayString [ebp+20]						;display message for printing the average
 
 calculateAvg:
-	mov		ecx, [ebp+12]						;ARRAYSIZE set as divisor for finding average
-	mov		eax, edi							
+	mov		eax, [ebp+32]		
+	cdq											;sign-extend to handle signed division
+	mov		ecx, [ebp+12]								;ARRAYSIZE set as divisor for finding average
 	idiv	ecx									;divide the sum of array elements by number of elements
 
 displayAvg:
+	push	[ebp+28]							;negFlag
 	push	eax									;average stored in eax
 	push	[ebp+16]							;address of outputString on stack
 	call	writeVal
@@ -412,7 +496,7 @@ displayAvg:
 	call	Crlf
 	
 	pop		ebp
-	ret		20
+	ret		28
 completeCalculations	ENDP
 
 
